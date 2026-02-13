@@ -6,7 +6,6 @@ Embedding
 
 """
 import numpy as np
-
 from .module import Module, Parameter
 from .tensor_functions import (zeros, ones, rand, tensor, tensor_from_numpy, zeros_tensor_from_numpy, ones_tensor_from_numpy)
 from .nn import one_hot
@@ -33,7 +32,7 @@ class Embedding(Module):
         self.num_embeddings = num_embeddings # Vocab size
         self.embedding_dim  = embedding_dim  # Embedding Dimension
         ### BEGIN ASSIGN3_2
-        raise NotImplementedError
+        self.weights = Parameter(tensor_from_numpy(np.random.normal(size=(self.num_embeddings, self.embedding_dim)), backend=backend, requires_grad=True))
         ### END ASSIGN3_2
     
     def forward(self, x: Tensor):
@@ -47,7 +46,14 @@ class Embedding(Module):
         """
         bs, seq_len = x.shape
         ### BEGIN ASSIGN3_2
-        raise NotImplementedError
+        # can I use an index?
+        x_flat = x.contiguous().view(bs*seq_len)
+        lookup = one_hot(x_flat, self.num_embeddings) #(B*S,V)    
+        
+        # lookup = one_hot(x, self.num_embeddings) # (B,S,V)    
+        out = lookup @ self.weights.value # (B,S,V) x (V,d)
+        # print(f"out shape: {out.shape}")
+        return out.view(bs,seq_len,self.embedding_dim)
         ### END ASSIGN3_2
 
     
@@ -73,7 +79,17 @@ class Dropout(Module):
         Note: If p_dropout is 0, directly return the input tensor. Otherwise, the random seed may cause problems
         """
         ### BEGIN ASSIGN3_2
-        raise NotImplementedError
+        if self.p_dropout == 0:
+            return x
+        
+        # if we are in training mode, set tensor values to 0 with probability p
+        if not self.training:
+            # if during training we dropped out values with probability p, then we want to scale by (1-p) in inference
+            return x
+        else:
+            mask = tensor_from_numpy(np.random.binomial(1, 1-self.p_dropout, size=x.shape), requires_grad=True)
+            zero_out = x*mask
+            return zero_out / (1-self.p_dropout)
         ### END ASSIGN3_2
 
 
@@ -93,7 +109,16 @@ class Linear(Module):
         """
         self.out_size = out_size
         ### BEGIN ASSIGN3_2
-        raise NotImplementedError
+        L = -1/np.sqrt(in_size)
+        R = 1/np.sqrt(in_size)
+        init_wt = tensor_from_numpy(np.random.uniform(low=L,high=R, size=(in_size, out_size)), backend=backend, requires_grad=True)
+        self.weights = Parameter(init_wt)
+        
+        if bias:
+            init_bias = tensor_from_numpy(np.random.uniform(low=L,high=R, size=(out_size)), backend=backend, requires_grad=True)
+            self.bias = Parameter(init_bias)
+        else:
+            self.bias = Parameter(zeros((out_size,), backend))
         ### END ASSIGN3_2
 
     def forward(self, x: Tensor):
@@ -107,7 +132,9 @@ class Linear(Module):
         """
         batch, in_size = x.shape
         ### BEGIN ASSIGN3_2
-        raise NotImplementedError
+        out = x @ self.weights.value + self.bias.value
+        print(f"in shape vs out shape : {x.shape} | {out.shape}")
+        return out
         ### END ASSIGN3_2
 
 
@@ -127,7 +154,8 @@ class LayerNorm1d(Module):
         self.dim = dim
         self.eps = eps
         ### BEGIN ASSIGN3_2
-        raise NotImplementedError
+        self.weights = Parameter(ones_tensor_from_numpy(shape=(self.dim,), backend=backend))
+        self.bias = Parameter(zeros_tensor_from_numpy(shape=(self.dim,), backend=backend))
         ### END ASSIGN3_2
 
     def forward(self, x: Tensor) -> Tensor:
@@ -143,5 +171,7 @@ class LayerNorm1d(Module):
         """
         batch, dim = x.shape
         ### BEGIN ASSIGN3_2
-        raise NotImplementedError
+        mu = x.mean(dim=1)
+        sigma = (x.var(dim=1)+self.eps)**0.5
+        return ((x-mu)/(sigma))*self.weights.value + self.bias.value
         ### END ASSIGN3_2
