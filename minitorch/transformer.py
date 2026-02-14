@@ -45,12 +45,11 @@ class MultiHeadAttention(Module):
         self.attn_hidden_dim = n_embd // n_head
 
         ### BEGIN ASSIGN3_3
-        raise NotImplementedError
-        # self.q_projection = 
-        # self.k_projection = 
-        # self.v_projection = 
-        # self.out_projection = 
-        # self.dropout = 
+        self.q_projection = Linear(self.n_embd, self.n_head*self.attn_hidden_dim)
+        self.k_projection = Linear(self.n_embd, self.n_head*self.attn_hidden_dim)
+        self.v_projection = Linear(self.n_embd, self.n_head*self.attn_hidden_dim)
+        self.out_projection = Linear(self.n_embd, self.n_embd)
+        self.dropout = Dropout(p_dropout)
         ### END ASSIGN3_3
 
     def create_causal_mask(self, seq_len):
@@ -87,7 +86,12 @@ class MultiHeadAttention(Module):
         """
         batch_size, seq_len, n_embd = x.shape
         ### BEGIN ASSIGN3_3
-        raise NotImplementedError
+        q = self.q_projection(x).contiguous().view(batch_size, seq_len, num_heads, attn_hidden_dim).permute(0,2,1,3)
+        kT = self.k_projection(x).contiguous().view(batch_size, seq_len, num_heads, attn_hidden_dim).permute(0,2,3,1)
+        v = self.v_projection(x).contiguous().view(batch_size, seq_len, num_heads, attn_hidden_dim).permute(0,2,1,3)
+        assert q.shape == (batch_size, self.n_head, seq_len, self.attn_hidden_dim)
+        assert kT.shape == (batch_size, self.n_head, self.attn_hidden_dim, seq_len)
+        assert v.shape == (batch_size, self.n_head, seq_len, self.attn_hidden_dim)
         ### END ASSIGN3_3
         return q, kT, v
     
@@ -110,7 +114,12 @@ class MultiHeadAttention(Module):
         result = None
         
         ### BEGIN ASSIGN3_3
-        raise NotImplementedError
+        scale = 1 / np.sqrt(q_dim)
+        mask = self.create_causal_mask(queries_len) # (1,1,T,T)
+        attn_logits = q @ kT + mask                 # (B,H,T,d)@(B,H,d,T) + (1,1,T,T)
+        result = softmax((attn_logits)*scale) @ v   # (B,H,T,T) @ (B,H,T,d) = (B,H,T,d)
+        result = result.permute(0,2,1,3).contiguous().view(batch_size, queries_len, num_heads*v_dim)
+        assert result.shape == (batch_size, queries_len, self.n_embd)
         ### END ASSIGN3_3
 
         return result
@@ -127,7 +136,10 @@ class MultiHeadAttention(Module):
         """
         batch_size, seq_len, n_embd = x.shape
         ### BEGIN ASSIGN3_3
-        raise NotImplementedError
+        q,kT,v = self.project_to_query_key_value(x)
+        mhsa = self.self_attention(q,kT,v)
+        assert mhsa.shape == (batch_size, seq_len, n_embd)
+        return mhsa
         ### END ASSIGN3_3
 
 
@@ -197,10 +209,10 @@ class TransformerLayer(Module):
         """
         ### BEGIN ASSIGN3_3
         raise NotImplementedError
-        # self.ln_1 = 
-        # self.ln_2 = 
-        # self.attention = 
-        # self.ff = 
+        self.ln_1 = LayerNorm1d(n_embd)
+        self.ln_2 = LayerNorm1d(n_embd)
+        self.attention = MultiHeadAttention(n_embd, n_head, causal=True, p_dropout=0.1, bias=True, backend=backend)
+        self.ff = FeedForward(n_embd, middle_dim=256, p_dropout=p_dropout, bias=bias, backend=backend)
         ### END ASSIGN3_3
 
     def forward(self, x):
@@ -215,7 +227,9 @@ class TransformerLayer(Module):
         """
         batch_size, seq_len, n_embd = x.shape
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError
+        x = self.attention(self.ln_1(x)) + x
+        x = self.ff(self.ln_2(x)) + x
+        return x
         ### END YOUR SOLUTION
 
 
