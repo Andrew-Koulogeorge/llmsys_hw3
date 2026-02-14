@@ -51,7 +51,7 @@ class Embedding(Module):
         lookup = one_hot(x_flat, self.num_embeddings) #(B*S,V)    
         
         # lookup = one_hot(x, self.num_embeddings) # (B,S,V)    
-        out = lookup @ self.weights.value # (B,S,V) x (V,d)
+        out = lookup @ self.weights.value # (B*S,V) x (V,d)
         # print(f"out shape: {out.shape}")
         return out.view(bs,seq_len,self.embedding_dim)
         ### END ASSIGN3_2
@@ -133,7 +133,6 @@ class Linear(Module):
         batch, in_size = x.shape
         ### BEGIN ASSIGN3_2
         out = x @ self.weights.value + self.bias.value
-        print(f"in shape vs out shape : {x.shape} | {out.shape}")
         return out
         ### END ASSIGN3_2
 
