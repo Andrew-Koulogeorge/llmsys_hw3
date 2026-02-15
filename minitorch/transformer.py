@@ -13,6 +13,7 @@ from .nn import (
     softmax,
     dropout,
     GELU,
+    one_hot
 )
 from typing import Any, Dict, Optional, Sequence, Tuple
 
@@ -119,7 +120,9 @@ class MultiHeadAttention(Module):
         ### BEGIN ASSIGN3_3
         scale = 1 / np.sqrt(q_dim)
         mask = self.create_causal_mask(queries_len) # (1,1,T,T)
-        attn_logits = (q @ kT)*scale + mask                 # (B,H,T,d)@(B,H,d,T) + (1,1,T,T)
+        attn_logits = (q @ kT)*scale                 # (B,H,T,d)@(B,H,d,T) 
+        if self.causal:
+            attn_logits += mask 
         result = softmax(attn_logits, dim=3) @ v   # (B,H,T,T) @ (B,H,T,d) = (B,H,T,d)
         result = result.permute(0,2,1,3).contiguous().view(batch_size, queries_len, self.n_head*v_dim)
         assert result.shape == (batch_size, queries_len, self.n_embd)
@@ -281,8 +284,8 @@ class DecoderLM(Module):
         self.n_vocab = n_vocab
         ### BEGIN ASSIGN3_3
         self.n_positions = n_positions
-        self.token_embeddings = Embedding(n_vocab, n_embd)
-        self.position_embeddings = Embedding(n_positions, n_embd)
+        self.token_embeddings = Embedding(n_vocab, n_embd, backend)
+        self.position_embeddings = Embedding(n_positions, n_embd, backend)
         self.t_layer_1 = TransformerLayer(n_embd=n_embd, n_head=n_head, p_dropout=p_dropout, ln_eps=ln_eps, bias=bias, backend=backend)
         self.t_layer_2 = TransformerLayer(n_embd=n_embd, n_head=n_head, p_dropout=p_dropout, ln_eps=ln_eps, bias=bias, backend=backend)
         self.t_layer_3 = TransformerLayer(n_embd=n_embd, n_head=n_head, p_dropout=p_dropout, ln_eps=ln_eps, bias=bias, backend=backend)
@@ -304,16 +307,18 @@ class DecoderLM(Module):
         """
         
         batch_size, seq_len = idx.shape
-
         ### BEGIN ASSIGN3_3
         # 1. Get token embeddings of shape (batch_size, seq_len, n_embd)
+        
+        # idx (batch_size, seq_len) of ids corresponding to tokens
+        # want one hot batch_size*seq_len, vocab_size
         tok_embeddings = self.token_embeddings(idx)
         # 2. Create positional embeddings of shape (1, seq_len, n_embd):
         #    - Create position ids tensor [0, 1, 2, ..., seq_len-1] of shape (1, seq_len)
         #    - Pass through positional embedding layer
         #    - Ensure output shape is (1, seq_len, n_embd)
-        pos_ids_one_hot = tensor_from_numpy(np.eye(self.n_positions)[np.arange(seq_len)]) # (seq_len, n_pos)
-        pos_embeddings = self.position_embeddings(pos_ids_one_hot).contiguous().view(1,seq_len,self.n_embd)
+        seq_len_range = tensor_from_numpy(np.arange(seq_len), self.backend).view(1,seq_len)
+        pos_embeddings = self.position_embeddings(seq_len_range)
         # 3. Add token and positional embeddings
         x = tok_embeddings + pos_embeddings
         # 4. Apply dropout
@@ -321,8 +326,8 @@ class DecoderLM(Module):
         # 5. Pass through transformer layers (t_layer_1 to t_layer_4)
         x = self.t_layer_4(self.t_layer_3(self.t_layer_2(self.t_layer_1(x))))
         # 6. Apply final layer normalization
-        x = self.ln(x)
+        x = self.ln(x.view(batch_size*seq_len, self.n_embd))
         # 7. Project to vocabulary size using lm_head
-        x = self.lm_head(x)
+        x = self.lm_head(x).contiguous().view(batch_size,seq_len, self.n_vocab)
         return x
         ### END ASSIGN3_3
