@@ -17,6 +17,7 @@ sys.path.append("./")
 import minitorch
 from minitorch import DecoderLM
 from minitorch.cuda_kernel_ops import CudaKernelOps
+import minitorch.nn as nn
 
 
 def get_dataset(dataset_name, model_max_length):
@@ -293,7 +294,7 @@ def generate(
     Returns:
         list: Generated target sequences
     """
-
+    VOCAB_SIZE = 10000
     model.eval()
     gen_sents = []
     for example in tqdm.tqdm(examples, desc=f'Generating {desc}'):
@@ -301,14 +302,16 @@ def generate(
 
         token_ids = tokenizer(f'{example[src_key]}<eos_{src_key}>')['input_ids']
         len_src = len(token_ids)
-
+        constant_range = minitorch.tensor_from_numpy(np.array(np.arange(VOCAB_SIZE)), requires_grad=False).view(1,VOCAB_SIZE)
         while len(token_ids) <= model_max_length:
             # BEGIN ASSIGN3_4
             # TODO
             # run the model with current token_ids, and predict the next token (gen_id)
             # hint: obtain the logits of next token, and take the argmax.
-            gen_id = 0
-            raise NotImplementedError("Generation Function Not Implemented Yet")
+            in_ = minitorch.tensor_from_numpy(np.array(token_ids), backend=backend).view(1,len(token_ids))
+            out = model(in_).view(len(token_ids), VOCAB_SIZE)
+            ont_hot_mat = nn.argmax(out, 1)
+            gen_id = int((ont_hot_mat*constant_range).sum(1).view(len(token_ids))[len(token_ids)-1])
             # END ASSIGN3_4
 
             if gen_id == tokenizer.vocab[f'<eos_{tgt_key}>']:
@@ -345,10 +348,15 @@ def main(
     model_max_length=40,
     n_epochs=20,
     batch_size=128,
-    learning_rate=0.02,
+    # learning_rate=0.02, # baseline
+    # learning_rate=0.01, # test1 (grad explode)
+    learning_rate=0.001, # test2
+    # learning_rate=0.005, # test3 (grad explode)
     samples_per_epoch=20000,
+    # samples_per_epoch=200, # for experimentation
     n_vocab=10000,
-    n_embd=256,
+    # n_embd=256,
+    n_embd=512, 
     seed=11111
 ):
     """
@@ -368,8 +376,8 @@ def main(
 
     np.random.seed(seed)
     random.seed(seed)
-
-    workdir = f'./workdir_vocab{n_vocab}_lr{learning_rate}_embd{n_embd}'
+    N_HEADS=16
+    workdir = f'./workdir_vocab{n_vocab}_lr{learning_rate}_embd{n_embd}_nheads{N_HEADS}'
     os.makedirs(workdir, exist_ok=True)
 
     backend = minitorch.TensorBackend(CudaKernelOps)
@@ -377,7 +385,8 @@ def main(
     config = {
         'n_vocab': n_vocab,  # vocab_size
         'n_embd': n_embd,  # n_embed
-        'n_head': 8,  # n_head
+        # 'n_head': 8,  # n_head
+        'n_head': N_HEADS,  # n_head
         'n_positions': model_max_length,  # n_ctx == n_positions
         # 'n_layer'     : 4,    # n_layer
         'p_dropout': 0.1,  # x_pdrop
@@ -417,7 +426,8 @@ def main(
             batch_size=batch_size,
             collate_fn=collate_fn,
             desc=desc)
-
+        
+        # for testing
         validation_loss = evaluate_loss(
             model=model,
             examples=dataset['validation'],
